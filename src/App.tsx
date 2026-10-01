@@ -20,11 +20,20 @@ import { ChatModal } from './components/chat/ChatModal';
 import { SafetyModal } from './components/safety/SafetyModal';
 import { DriverRegistrationModal } from './components/driver/DriverRegistrationModal';
 import { AuthModal } from './components/auth/AuthModal';
+import { PostRideFeedbackModal } from './components/ride/PostRideFeedbackModal';
 import { ArrowRight, ShieldCheck, Car, Key, Truck, Package } from 'lucide-react';
 import { VehicleCategory } from './types';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, setActiveTab, activeRide, currentUser } = useApp();
+  const {
+    activeTab,
+    setActiveTab,
+    activeRide,
+    currentUser,
+    feedbackModalRide,
+    feedbackModalRole,
+    closeFeedbackModal,
+  } = useApp();
 
   // Modal States
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -276,6 +285,13 @@ const MainLayout: React.FC = () => {
         isOpen={driverRegistrationOpen}
         onClose={() => setDriverRegistrationOpen(false)}
         onSuccess={() => setActiveTab('driver')}
+      />
+
+      <PostRideFeedbackModal
+        isOpen={Boolean(feedbackModalRide)}
+        onClose={closeFeedbackModal}
+        ride={feedbackModalRide}
+        role={feedbackModalRole}
       />
     </div>
   );

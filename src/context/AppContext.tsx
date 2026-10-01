@@ -791,7 +791,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const completeTrip = async (rideId: string, actualFare?: number) => {
     const fare = actualFare || (activeRide ? activeRide.estimatedFare : 35);
-    setActiveRide((prev) => (prev ? { ...prev, status: 'TRIP_COMPLETED', actualFare: fare } : null));
+    const completedRide: RideRequest | null = activeRide
+      ? { ...activeRide, status: 'TRIP_COMPLETED' as const, actualFare: fare }
+      : null;
+
+    setActiveRide(completedRide);
+
+    if (completedRide) {
+      setPastRides((prev) => [completedRide, ...prev.filter((r) => r.id !== rideId)]);
+      setDriverPastRides((prev) => [completedRide, ...prev.filter((r) => r.id !== rideId)]);
+
+      // Auto-open feedback modal for driver to rate rider
+      setFeedbackModalRide(completedRide);
+      setFeedbackModalRole('driver');
+    }
 
     await fetch(`/api/rides/${rideId}/status`, {
       method: 'POST',
@@ -802,13 +815,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshAdminData();
   };
 
+  const submitRideFeedback = async (
+    rideId: string,
+    role: 'rider' | 'driver',
+    rating: number,
+    tags: string[],
+    comment?: string
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/rides/${rideId}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, rating, tags, comment }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit feedback');
+
+      const feedbackObj: RideFeedback = {
+        rating,
+        tags,
+        comment,
+        createdAt: new Date().toISOString(),
+      };
+
+      setPastRides((prev) =>
+        prev.map((r) => {
+          if (r.id === rideId) {
+            return {
+              ...r,
+              status: 'RATED',
+              ...(role === 'driver' ? { driverFeedback: feedbackObj } : { riderFeedback: feedbackObj, rating }),
+            };
+          }
+          return r;
+        })
+      );
+
+      setDriverPastRides((prev) =>
+        prev.map((r) => {
+          if (r.id === rideId) {
+            return {
+              ...r,
+              status: 'RATED',
+              ...(role === 'driver' ? { driverFeedback: feedbackObj } : { riderFeedback: feedbackObj, rating }),
+            };
+          }
+          return r;
+        })
+      );
+
+      setActiveRide((prev) => {
+        if (prev && prev.id === rideId) {
+          return {
+            ...prev,
+            status: 'RATED',
+            ...(role === 'driver' ? { driverFeedback: feedbackObj } : { riderFeedback: feedbackObj, rating }),
+          };
+        }
+        return prev;
+      });
+
+      if (data.updatedDriverRating) {
+        setCurrentDriver((d) => ({ ...d, rating: data.updatedDriverRating }));
+      }
+      if (data.updatedPassengerRating && currentUser.id) {
+        setCurrentUser((u) => {
+          const updated = { ...u, rating: data.updatedPassengerRating };
+          localStorage.setItem('trustride_user', JSON.stringify(updated));
+          return updated;
+        });
+      }
+
+      addAuditLog(
+        'RIDE_RATED',
+        `Ride #${rideId}`,
+        `${role === 'driver' ? 'Driver' : 'Rider'} gave ${rating} stars: "${comment || 'No comment'}"`
+      );
+
+      return true;
+    } catch (err: any) {
+      console.error('Feedback submit error:', err);
+      return false;
+    }
+  };
+
   const rateTrip = (rideId: string, rating: number, comment?: string) => {
-    setActiveRide(null);
-    fetch(`/api/rides/${rideId}/rate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rating, comment }),
-    }).catch(() => {});
+    submitRideFeedback(rideId, 'rider', rating, ['✨ Clean Vehicle', '🛡️ Safe Driving'], comment);
   };
 
   const cancelRide = async (rideId: string, reason: string) => {
@@ -1000,6 +1092,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveRide,
         incomingDriverRequest,
         pastRides,
+        driverPastRides,
+        loadDriverRides,
         requestRide,
         acceptRideDriver,
         declineRideDriver,
@@ -1007,6 +1101,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startTrip,
         completeTrip,
         rateTrip,
+        submitRideFeedback,
+        feedbackModalRide,
+        feedbackModalRole,
+        openFeedbackModal,
+        closeFeedbackModal,
         cancelRide,
         deliveries,
         createDeliveryOrder,
